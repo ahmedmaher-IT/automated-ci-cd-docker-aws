@@ -11,11 +11,44 @@ provider "aws" {
   region = var.aws_region
 }
 
-# ── Security Group ────────────────────────────────────────────────────────────
+resource "aws_vpc" "main" {
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+  tags = { Name = "flask-cicd-vpc", Project = "cicd-pipeline" }
+}
+
+resource "aws_internet_gateway" "igw" {
+  vpc_id = aws_vpc.main.id
+  tags = { Name = "flask-cicd-igw", Project = "cicd-pipeline" }
+}
+
+resource "aws_subnet" "public" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.1.0/24"
+  map_public_ip_on_launch = true
+  availability_zone       = "${var.aws_region}a"
+  tags = { Name = "flask-cicd-subnet", Project = "cicd-pipeline" }
+}
+
+resource "aws_route_table" "public_rt" {
+  vpc_id = aws_vpc.main.id
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.igw.id
+  }
+  tags = { Name = "flask-cicd-rt", Project = "cicd-pipeline" }
+}
+
+resource "aws_route_table_association" "public_rta" {
+  subnet_id      = aws_subnet.public.id
+  route_table_id = aws_route_table.public_rt.id
+}
+
 resource "aws_security_group" "flask_sg" {
   name        = "flask-cicd-sg"
   description = "Allow HTTP and SSH traffic"
-
+  vpc_id      = aws_vpc.main.id
   ingress {
     description = "SSH"
     from_port   = 22
@@ -23,7 +56,6 @@ resource "aws_security_group" "flask_sg" {
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
-
   ingress {
     description = "HTTP"
     from_port   = 80
@@ -31,38 +63,28 @@ resource "aws_security_group" "flask_sg" {
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
-
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
-
-  tags = {
-    Name    = "flask-cicd-sg"
-    Project = "cicd-pipeline"
-  }
+  tags = { Name = "flask-cicd-sg", Project = "cicd-pipeline" }
 }
 
-# ── EC2 Instance ──────────────────────────────────────────────────────────────
 resource "aws_instance" "flask_server" {
   ami                    = var.ami_id
   instance_type          = var.instance_type
   key_name               = var.key_pair_name
+  subnet_id              = aws_subnet.public.id
   vpc_security_group_ids = [aws_security_group.flask_sg.id]
-
-  user_data = <<-EOF
+  user_data = <<-SCRIPT
     #!/bin/bash
     yum update -y
     yum install -y docker
     systemctl start docker
     systemctl enable docker
     usermod -aG docker ec2-user
-  EOF
-
-  tags = {
-    Name    = "flask-cicd-server"
-    Project = "cicd-pipeline"
-  }
+  SCRIPT
+  tags = { Name = "flask-cicd-server", Project = "cicd-pipeline" }
 }
