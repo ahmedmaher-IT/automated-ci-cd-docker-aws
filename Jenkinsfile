@@ -24,7 +24,7 @@ pipeline {
                 echo '==> Running unit tests...'
                 sh '''
                     pip3 install -r app/requirements.txt --quiet
-                    cd app && pytest test_app.py -v
+                    cd app && python3 -m pytest test_app.py -v
                 '''
             }
         }
